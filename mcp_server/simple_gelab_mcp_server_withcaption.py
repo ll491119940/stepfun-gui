@@ -1,6 +1,8 @@
 from fastmcp import FastMCP
 
 import sys
+import os
+import argparse
 if "." not in sys.path:
     sys.path.append(".")
 
@@ -10,6 +12,8 @@ from copilot_agent_server.local_server import LocalServer
 from copilot_agent_client.pu_client import evaluate_task_on_device
 
 import yaml
+from megfile import smart_open
+from tools.config_path_helper import get_config_path
 
 from typing import Annotated
 from pydantic import Field
@@ -274,7 +278,113 @@ if you have
     return return_log
 
 
-with open("mcp_server_config.yaml", "r") as f:
-    mcp_server_config = yaml.safe_load(f)
+def update_model_config_api_key(api_key: str, provider: str = "stepfun"):
+    """
+    更新 model_config.yaml 中的 API key
+    
+    Args:
+        api_key: 新的 API key
+        provider: 模型提供商，默认为 "stepfun"
+    """
+    try:
+        # 优先从打包的配置文件中读取默认配置
+        config_path = get_config_path("model_config.yaml")
+        
+        # 读取现有配置
+        with smart_open(config_path, "r") as f:
+            model_config = yaml.safe_load(f) or {}
+        
+        # 更新 API key
+        if provider not in model_config:
+            model_config[provider] = {}
+        
+        # 保留原有的 api_base，只更新 api_key
+        if "api_base" not in model_config[provider]:
+            if provider == "stepfun":
+                model_config[provider]["api_base"] = "https://api.stepfun.com/v1"
+            elif provider == "local":
+                model_config[provider]["api_base"] = "http://localhost:11434/v1"
+            else:
+                model_config[provider]["api_base"] = ""
+        
+        model_config[provider]["api_key"] = api_key
+        
+        # 将更新的配置写入工作目录
+        # 这样 tools/ask_llm_v2.py 等模块就能读取到更新后的配置
+        # 工作目录中的配置文件会覆盖打包文件中的配置
+        work_dir_config_path = os.path.join(os.getcwd(), "model_config.yaml")
+        with open(work_dir_config_path, "w") as f:
+            yaml.dump(model_config, f, default_flow_style=False, allow_unicode=True)
+        
+    except Exception as e:
+        print(f"警告: 更新 model_config.yaml 失败: {e}")
+        print("将使用默认配置文件中的 API key")
 
-mcp.run(transport="http", port=mcp_server_config['server_config'].get("mcp_server_port", 8702))
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Gelab MCP Server - 移动设备 GUI 代理服务",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  # 使用默认配置（model_config.yaml 中的配置）
+  python simple_gelab_mcp_server_withcaption.py
+  
+  # 使用自定义 API key
+  python simple_gelab_mcp_server_withcaption.py --api-key YOUR_API_KEY
+  
+  # 指定提供商和 API key
+  python simple_gelab_mcp_server_withcaption.py --api-key YOUR_API_KEY --provider stepfun
+  
+  # 指定端口
+  python simple_gelab_mcp_server_withcaption.py --port 8705
+        """
+    )
+    
+    parser.add_argument(
+        "--api-key",
+        type=str,
+        default=None,
+        help="API key for the model provider (如果提供，将更新 model_config.yaml 中的配置)"
+    )
+    
+    parser.add_argument(
+        "--provider",
+        type=str,
+        default="stepfun",
+        choices=["stepfun", "local"],
+        help="模型提供商 (默认: stepfun)"
+    )
+    
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="MCP 服务器端口 (默认: 从 mcp_server_config.yaml 读取)"
+    )
+    
+    args = parser.parse_args()
+    
+    # 如果提供了 API key，更新配置文件
+    if args.api_key:
+        update_model_config_api_key(args.api_key, args.provider)
+        masked_key = '*' * (len(args.api_key) - 4) + args.api_key[-4:] if len(args.api_key) > 4 else '****'
+        print(f"✓ 已通过命令行参数设置 {args.provider} 的 API key: {masked_key}")
+    else:
+        print(f"✓ 使用 model_config.yaml 中的默认配置 (provider: {args.provider})")
+    
+    # 读取 MCP 服务器配置
+    mcp_server_config_path = get_config_path("mcp_server_config.yaml")
+    with smart_open(mcp_server_config_path, "r") as f:
+        mcp_server_config = yaml.safe_load(f)
+    
+    port = args.port or mcp_server_config['server_config'].get("mcp_server_port", 8704)
+    
+    print(f"正在启动 MCP 服务器，端口: {port}")
+    print(f"模型提供商: {args.provider}")
+    
+    mcp.run(transport="http", port=port)
+
+
+if __name__ == "__main__":
+    main()

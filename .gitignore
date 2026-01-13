@@ -6,3 +6,9 @@ running_log
 gelab-zero-4b-preview/
 
 model_config.yaml
+
+__pycache__/
+build/
+dist/
+venv/
+.DS_Store

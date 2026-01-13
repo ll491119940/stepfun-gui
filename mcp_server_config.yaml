@@ -4,8 +4,8 @@ agent_loop_config: {
 
     # the gui main model config
     "model_config": {
-        "model_name": "gelab-zero-4b-preview",
-        "model_provider": "local",
+        "model_name": "step-gui",
+        "model_provider": "stepfun",
 
         "args": {
             "temperature": 0.1,
