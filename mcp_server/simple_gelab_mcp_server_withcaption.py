@@ -1,10 +1,125 @@
-from fastmcp import FastMCP
-
+# 在导入其他模块之前，先应用运行时补丁（修复 PyInstaller 打包后的问题）
 import sys
 import os
-import argparse
+import types
 if "." not in sys.path:
     sys.path.append(".")
+
+# 禁用 OpenTelemetry（打包后缺少元数据/entry_points 引发 baggage 等导入失败）
+if getattr(sys, "frozen", False) or os.environ.get("OTEL_SDK_DISABLED", "").lower() == "true":
+    os.environ["OTEL_SDK_DISABLED"] = "true"
+
+    class UniversalMock(types.ModuleType):
+        """万能 Mock 类：可以被当作模块、类、函数使用，且访问任何属性都返回自身。"""
+        def __init__(self, name):
+            super().__init__(name)
+            self.__path__ = []
+            self.__file__ = "<mock>"
+            self.__all__ = []
+            # 设置 spec 满足某些库的包检查
+            try:
+                import importlib.machinery
+                self.__spec__ = importlib.machinery.ModuleSpec(name, loader=None, is_package=True)
+            except Exception:
+                pass
+
+        def __getattr__(self, name):
+            if name in ("__path__", "__file__", "__spec__", "__loader__", "__name__", "__package__", "__mro_entries__"):
+                return super().__getattribute__(name)
+            # 访问任何不存在的属性时，自动创建一个新的万能 Mock
+            child = UniversalMock(f"{self.__name__}.{name}")
+            setattr(self, name, child)
+            return child
+
+        def __mro_entries__(self, bases):
+            # 支持被继承：返回一个动态创建的类
+            return (type(self.__name__.split('.')[-1], (), {}),)
+
+        def __or__(self, other): return self  # 支持 Type | None 语法
+        def __ror__(self, other): return self # 支持 None | Type 语法
+
+        def __call__(self, *args, **kwargs): return self
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def __getitem__(self, key): return self
+        def __iter__(self): return iter([])
+
+    class OtelMockFinder:
+        """导入拦截器：拦截所有 opentelemetry 开头的导入"""
+        def find_spec(self, fullname, path, target=None):
+            if fullname.startswith("opentelemetry"):
+                from importlib.machinery import ModuleSpec
+                return ModuleSpec(fullname, self)
+            return None
+        def create_module(self, spec):
+            return UniversalMock(spec.name)
+        def exec_module(self, module):
+            pass
+
+    # 将拦截器插入导入链的最前端
+    sys.meta_path.insert(0, OtelMockFinder())
+
+    # 清理掉可能已经部分加载的模块，确保拦截器生效
+    for mod_name in list(sys.modules.keys()):
+        if mod_name.startswith("opentelemetry"):
+            del sys.modules[mod_name]
+else:
+    # 非冻结环境且未禁用 OTEL 时的逻辑
+    os.environ["OTEL_PYTHON_CONTEXT"] = "contextvars_context"
+    os.environ["OTEL_PYTHON_PROPAGATOR"] = "tracecontext"
+    os.environ["OTEL_PYTHON_PROPAGATORS"] = "tracecontext"
+
+    # 直接初始化 otel runtime context，绕过 entry_points
+    try:
+        from opentelemetry.context.contextvars_context import ContextVarsRuntimeContext
+        import opentelemetry.context as ctx_mod
+
+        ctx_mod._load_runtime_context = lambda: ContextVarsRuntimeContext()
+        ctx_mod._RUNTIME_CONTEXT = ctx_mod._load_runtime_context()
+    except Exception:
+        pass
+
+    # 直接设置 propagator，避免 tracecontext 入口点缺失
+    try:
+        from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+        import opentelemetry.propagate as prop_mod
+
+        prop_mod._GLOBAL_TEXTMAP = TraceContextTextMapPropagator()
+        # 同时确保全局工厂只返回 tracecontext，避免 baggage 被尝试加载
+        try:
+            prop_mod._PROPAGATOR_FACTORY = lambda *_args, **_kwargs: [TraceContextTextMapPropagator()]
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    # 兜底 importlib_metadata.version，防止 otel 包元数据缺失时报 PackageNotFoundError
+    try:
+        import importlib_metadata
+        _orig_version = importlib_metadata.version
+
+        def _safe_version(name):
+            try:
+                return _orig_version(name)
+            except importlib_metadata.PackageNotFoundError:
+                if name in ("opentelemetry-sdk", "opentelemetry-api", "opentelemetry-exporter-prometheus"):
+                    return "1.39.1"
+                raise
+
+        importlib_metadata.version = _safe_version
+    except Exception:
+        pass
+
+# 导入运行时补丁（必须在 fastmcp 之前）
+try:
+    import runtime_patch
+except ImportError:
+    # 如果 runtime_patch 不存在，继续执行（开发环境）
+    pass
+
+from fastmcp import FastMCP
+
+import argparse
 
 from copilot_front_end.mobile_action_helper import list_devices, get_device_wm_size
 from copilot_agent_server.local_server import LocalServer

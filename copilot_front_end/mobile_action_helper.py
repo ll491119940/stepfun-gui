@@ -220,12 +220,31 @@ def list_devices():
     List all connected mobile devices.
     """
     try:
-        result = subprocess.run(['adb', 'devices'], capture_output=True, text=True)
-        devices = result.stdout.splitlines()[1:]
-        devices = [line.split()[0].strip() for line in devices if line.strip() and 'device' in line]
+        print("Executing: adb devices")
+        result = subprocess.run(['adb', 'devices'], capture_output=True, text=True, shell=True)
+        print(f"adb devices stdout: {result.stdout}")
+        print(f"adb devices stderr: {result.stderr}")
+        print(f"adb devices return code: {result.returncode}")
+        
+        lines = result.stdout.splitlines()
+        print(f"adb devices output lines: {lines}")
+        
+        devices = []
+        if len(lines) > 1:
+            for line in lines[1:]:
+                if line.strip() and 'device' in line and 'List of devices attached' not in line:
+                    parts = line.split()
+                    if parts:
+                        device_id = parts[0].strip()
+                        devices.append(device_id)
+                        print(f"Found device: {device_id}")
+        
+        print(f"Total devices found: {devices}")
         return devices
     except Exception as e:
         print(f"Error listing devices: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 def _capture_save_screenshot(device_id, tmp_file_dir="tmp_screenshot", image_name = None, print_command = False):
