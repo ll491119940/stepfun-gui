@@ -19,6 +19,8 @@ import base64
 
 from megfile import smart_open, smart_remove
 
+from tools.config_path_helper import get_config_path
+
 # TODO: to manage the usage status of all devices, and meke an option to display only available devices
 def get_device_list():
     """
@@ -180,7 +182,9 @@ def execute_task(
 
 
     # load mcp server config
-    mcp_server_config = yaml.safe_load(smart_open("mcp_server_config.yaml", "r"))
+    _mcp_server_config_path = get_config_path("mcp_server_config.yaml")
+    with smart_open(_mcp_server_config_path, "r") as f:
+        mcp_server_config = yaml.safe_load(f)
     agent_loop_config = mcp_server_config['agent_loop_config']
 
     # determine the actual max_steps

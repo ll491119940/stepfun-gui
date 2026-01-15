@@ -70,7 +70,7 @@ pyinstaller --clean --noconfirm gelab_mcp_server.spec
 
 - **使用默认配置**：打包时 `model_config.yaml` 中的 API key 已包含在可执行文件中
 - **无需参数**：直接运行即可，会自动使用默认配置
-- **配置文件位置**：配置文件已包含在可执行文件中，PyInstaller 会自动处理路径
+- **配置文件位置**：默认配置已包含在可执行文件中，PyInstaller 会自动处理路径；如果你想让用户可编辑配置，把 `model_config.yaml` / `mcp_server_config.yaml` 放到可执行文件同目录即可覆盖内置配置
 
 ### 示例
 
@@ -244,7 +244,9 @@ ModuleNotFoundError: No module named 'lupa.lua51'
 
 ### 问题 5: 运行时找不到配置文件
 
-**解决方案**：确保 `mcp_server_config.yaml` 和 `model_config.yaml` 在可执行文件同一目录，或使用绝对路径。
+**解决方案**：
+- **默认情况下**：配置文件已打包进可执行文件（无需额外复制）。
+- **如果需要可编辑/可覆盖**：把 `mcp_server_config.yaml` 和 `model_config.yaml` 放在**可执行文件同一目录**（程序会优先读取同目录配置），或设置环境变量 `GELAB_CONFIG_DIR` 指向配置目录。
 
 ### 问题 6: 可执行文件体积过大
 
