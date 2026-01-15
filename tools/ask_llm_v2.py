@@ -10,6 +10,7 @@ import yaml
 
 import json
 import time
+from tools.config_path_helper import get_config_path
 
 def ask_llm_anything(model_provider, model_name, messages, args= {
     "max_tokens": 256,
@@ -18,7 +19,8 @@ def ask_llm_anything(model_provider, model_name, messages, args= {
     "frequency_penalty": 0.0,
 }, resize_config=None):
 
-    with smart_open("model_config.yaml", "r") as f:
+    _model_config_path = get_config_path("model_config.yaml")
+    with smart_open(_model_config_path, "r") as f:
         model_config = yaml.safe_load(f)
     
 

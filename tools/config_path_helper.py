@@ -17,24 +17,50 @@ def get_config_path(config_filename: str) -> str:
     Returns:
         配置文件的完整路径
     """
-    # 检查是否在 PyInstaller 打包环境中
-    if getattr(sys, 'frozen', False):
-        # 打包环境：配置文件在 sys._MEIPASS 中
-        base_path = sys._MEIPASS
+    # 允许通过环境变量显式指定配置目录（优先级最高）
+    # 例如：GELAB_CONFIG_DIR=/path/to/configs
+    env_config_dir = os.environ.get("GELAB_CONFIG_DIR")
+
+    candidate_dirs: list[Path] = []
+    if env_config_dir:
+        candidate_dirs.append(Path(env_config_dir).expanduser())
+
+    # PyInstaller 打包环境
+    if getattr(sys, "frozen", False):
+        # 1) 优先使用可执行文件同目录（便于用户直接修改配置并覆盖内置配置）
+        try:
+            candidate_dirs.append(Path(sys.executable).resolve().parent)
+        except Exception:
+            pass
+
+        # 2) 其次使用 PyInstaller 的解包目录（onefile/onedir 都可能存在）
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidate_dirs.append(Path(meipass))
     else:
-        # 开发环境：配置文件在项目根目录
-        # 尝试从当前文件位置推断项目根目录
+        # 开发环境：配置文件在项目根目录（tools/..）
         current_file = Path(__file__).resolve()
-        # tools/config_path_helper.py -> 项目根目录
-        base_path = current_file.parent.parent
-    
-    config_path = os.path.join(base_path, config_filename)
-    
-    # 如果文件不存在，尝试在当前工作目录查找（作为后备方案）
-    if not os.path.exists(config_path):
-        fallback_path = os.path.join(os.getcwd(), config_filename)
-        if os.path.exists(fallback_path):
-            return fallback_path
-    
-    return config_path
+        candidate_dirs.append(current_file.parent.parent)
+
+    # 3) 最后兜底：当前工作目录（某些启动方式会把配置放在 cwd）
+    candidate_dirs.append(Path.cwd())
+
+    # 去重（保序）
+    seen: set[str] = set()
+    unique_dirs: list[Path] = []
+    for d in candidate_dirs:
+        key = str(d)
+        if key not in seen:
+            seen.add(key)
+            unique_dirs.append(d)
+
+    for base_dir in unique_dirs:
+        config_path = base_dir / config_filename
+        if config_path.exists():
+            return str(config_path)
+
+    # 如果都找不到，返回一个“最可能”的路径，方便上层报错时更可读
+    if unique_dirs:
+        return str(unique_dirs[0] / config_filename)
+    return config_filename
 

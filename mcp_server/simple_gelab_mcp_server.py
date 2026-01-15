@@ -10,6 +10,8 @@ from copilot_agent_server.local_server import LocalServer
 from copilot_agent_client.pu_client import evaluate_task_on_device
 
 import yaml
+from megfile import smart_open
+from tools.config_path_helper import get_config_path
 
 from typing import Annotated
 from pydantic import Field
@@ -138,8 +140,8 @@ Returns:
     return return_log
 
 
-
-with open("mcp_server_config.yaml", "r") as f:
+_mcp_server_config_path = get_config_path("mcp_server_config.yaml")
+with smart_open(_mcp_server_config_path, "r") as f:
     mcp_server_config = yaml.safe_load(f)
 
 mcp.run(transport="http", port=mcp_server_config['server_config'].get("mcp_server_port", 8702))
