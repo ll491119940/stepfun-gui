@@ -2,8 +2,15 @@
 import sys
 import os
 import types
+
 if "." not in sys.path:
     sys.path.append(".")
+
+# 导入运行时补丁（处理 importlib.metadata 和 opentelemetry 问题）
+try:
+    import runtime_patch
+except ImportError:
+    pass
 
 # 禁用 OpenTelemetry（打包后缺少元数据/entry_points 引发 baggage 等导入失败）
 if getattr(sys, "frozen", False) or os.environ.get("OTEL_SDK_DISABLED", "").lower() == "true":
@@ -93,29 +100,7 @@ else:
     except Exception:
         pass
 
-    # 兜底 importlib_metadata.version，防止 otel 包元数据缺失时报 PackageNotFoundError
-    try:
-        import importlib_metadata
-        _orig_version = importlib_metadata.version
-
-        def _safe_version(name):
-            try:
-                return _orig_version(name)
-            except importlib_metadata.PackageNotFoundError:
-                if name in ("opentelemetry-sdk", "opentelemetry-api", "opentelemetry-exporter-prometheus"):
-                    return "1.39.1"
-                raise
-
-        importlib_metadata.version = _safe_version
-    except Exception:
-        pass
-
-# 导入运行时补丁（必须在 fastmcp 之前）
-try:
-    import runtime_patch
-except ImportError:
-    # 如果 runtime_patch 不存在，继续执行（开发环境）
-    pass
+# 导入运行时补丁已在文件顶部完成
 
 from fastmcp import FastMCP
 

@@ -6,7 +6,7 @@ fastapi
 uvicorn
 
 pymongo
-openai==1.95.1
+openai==0.28.0
 httpx==0.28.1
 httpcore==1.0.5
 h11==0.14.0
@@ -19,7 +19,7 @@ streamlit
 tqdm
 requests
 
-fastmcp==2.14.2
+fastmcp
 opentelemetry-api==1.39.1
 opentelemetry-sdk==1.39.1
 opentelemetry-exporter-prometheus==0.60b1

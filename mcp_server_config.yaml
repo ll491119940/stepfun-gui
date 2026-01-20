@@ -37,8 +37,8 @@ agent_loop_config: {
     # if provided, will use this config for auto reply
     "reply_config": {
         "model_config": {
-            "model_name": "gelab-zero-4b-preview",
-            "model_provider": "local",
+            "model_name": "step-gui",
+            "model_provider": "stepfun",
 
             "args": {
                 "temperature": 0.5,
@@ -61,8 +61,8 @@ agent_loop_config: {
     # to caption the image before sending to the model
     "caption_config": {
         "model_config": {
-            "model_name": "gelab-zero-4b-preview",
-            "model_provider": "local",
+            "model_name": "step-gui",
+            "model_provider": "stepfun",
 
             "args": {
                 "temperature": 0.5,

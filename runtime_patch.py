@@ -1,124 +1,66 @@
 """
 运行时补丁：修复 PyInstaller 打包后的常见问题
-1. fastmcp 无法读取版本信息
-2. opentelemetry 上下文加载失败
-在导入相关模块之前执行此补丁
 """
 import sys
 import os
+import types
 
-# 检查是否在 PyInstaller 打包环境中
-if getattr(sys, 'frozen', False):
-    # 在打包环境中，尝试修复 importlib.metadata 的版本查找
-    
-    # 方法1: 尝试从环境变量或硬编码版本
+def apply_metadata_patch():
+    packages_to_patch = {'fastmcp': '2.14.2', 'opentelemetry-api': '1.39.1', 'opentelemetry-sdk': '1.39.1'}
+    for mod_name in ['importlib.metadata', 'importlib_metadata']:
+        try:
+            import importlib
+            mod = importlib.import_module(mod_name)
+            if hasattr(mod, 'version'):
+                orig_v = mod.version
+                mod.version = lambda n: orig_v(n) if n not in packages_to_patch else packages_to_patch[n]
+        except: pass
+
+def apply_certifi_patch():
+    """彻底修复 PyInstaller 打包后的证书丢失和路径无效问题"""
     try:
-        import importlib.metadata
+        import os
+        import sys
+        import certifi
         
-        # 如果 fastmcp 的版本查找失败，提供一个默认值
-        original_version = importlib.metadata.version
-        
-        def patched_version(package_name):
-            try:
-                return original_version(package_name)
-            except importlib.metadata.PackageNotFoundError:
-                # 如果找不到包元数据，返回一个默认版本
-                if package_name == 'fastmcp':
-                    # 尝试从环境变量获取，或使用默认值
-                    return os.environ.get('FASTMCP_VERSION', '2.14.2')
-                raise
-        
-        # 替换 version 函数
-        importlib.metadata.version = patched_version
-        
+        if getattr(sys, 'frozen', False):
+            # 1. 强制定位打包后的证书路径
+            # PyInstaller 会把 collect_data_files('certifi') 的结果放在 certifi 子目录
+            base_path = sys._MEIPASS
+            cert_path = os.path.join(base_path, 'certifi', 'cacert.pem')
+            
+            # 如果不存在，尝试在根目录找
+            if not os.path.exists(cert_path):
+                cert_path = os.path.join(base_path, 'cacert.pem')
+            
+            # 2. 如果找到了证书，进行路径标准化
+            if os.path.exists(cert_path):
+                # 转换为长路径，防止 ~1 符号导致某些库识别失败
+                if os.name == 'nt' and '~' in cert_path:
+                    try:
+                        import ctypes
+                        kernel32 = ctypes.windll.kernel32
+                        buf = ctypes.create_unicode_buffer(1024)
+                        if kernel32.GetLongPathNameW(cert_path, buf, 1024) > 0:
+                            cert_path = buf.value
+                    except: pass
+                
+                # 3. 注入到所有可能的变量中
+                os.environ['SSL_CERT_FILE'] = cert_path
+                os.environ['REQUESTS_CA_BUNDLE'] = cert_path
+                
+                # 4. 暴力修补 certifi 模块，让所有依赖它的库（openai, requests, httpx）都强制使用这个路径
+                certifi.where = lambda: cert_path
+                
+                # 5. 针对已经加载的 requests 库进行修补
+                if 'requests' in sys.modules:
+                    import requests.adapters
+                    requests.adapters.DEFAULT_CA_BUNDLE_PATH = cert_path
+                    
+                # print(f"Cert fixed at: {cert_path}")
     except Exception:
         pass
-    
-    # 修复 opentelemetry 上下文加载问题
-    # opentelemetry 在 PyInstaller 打包后，_load_runtime_context 中使用 next() 会抛出 StopIteration
-    # 需要在 opentelemetry.context 模块被导入之前就拦截并修复
-    try:
-        import contextvars
-        import threading
-        
-        # 保存原始的 __import__ 函数
-        _original_import = __builtins__.__import__ if isinstance(__builtins__, dict) else __builtins__.__import__
-        
-        def safe_load_runtime_context():
-            """安全的运行时上下文加载函数，避免 StopIteration 错误"""
-            contexts_to_try = [
-                'opentelemetry.context.contextvars_context',
-                'opentelemetry.context.threadlocal_context',
-            ]
-            
-            for context_name in contexts_to_try:
-                try:
-                    # 先检查是否已经在 sys.modules 中
-                    if context_name in sys.modules:
-                        return sys.modules[context_name]
-                    
-                    # 尝试导入
-                    module = _original_import(context_name, fromlist=[''])
-                    if module:
-                        return module
-                except (ImportError, StopIteration, AttributeError, KeyError, Exception):
-                    continue
-            
-            # 如果都失败了，返回 None（opentelemetry 会使用默认实现）
-            return None
-        
-        # 使用导入钩子在模块加载时立即修复
-        class OpenTelemetryContextImportHook:
-            """导入钩子，在 opentelemetry.context 加载时立即修复"""
-            def find_spec(self, name, path, target=None):
-                if name == 'opentelemetry.context':
-                    # 返回一个 spec，让模块正常加载，但我们会拦截加载过程
-                    return None
-                return None
-            
-            def create_module(self, spec):
-                return None
-            
-            def exec_module(self, module):
-                # 在模块执行后立即修复
-                if hasattr(module, '_load_runtime_context'):
-                    module._load_runtime_context = safe_load_runtime_context
-        
-        # 注册导入钩子
-        if not hasattr(sys, 'meta_path'):
-            sys.meta_path = []
-        
-        # 检查是否已经注册了钩子
-        hook_exists = any(isinstance(hook, OpenTelemetryContextImportHook) for hook in sys.meta_path)
-        if not hook_exists:
-            sys.meta_path.insert(0, OpenTelemetryContextImportHook())
-        
-        # 同时使用 __import__ 拦截作为备用方案
-        def patched_import(name, globals=None, locals=None, fromlist=(), level=0):
-            """修补的导入函数"""
-            result = _original_import(name, globals, locals, fromlist, level)
-            
-            # 如果导入了 opentelemetry.context，立即修复
-            if name == 'opentelemetry.context':
-                try:
-                    if 'opentelemetry.context' in sys.modules:
-                        ctx_module = sys.modules['opentelemetry.context']
-                        if hasattr(ctx_module, '_load_runtime_context'):
-                            ctx_module._load_runtime_context = safe_load_runtime_context
-                except Exception:
-                    pass
-            
-            return result
-        
-        # 替换 __import__ 函数
-        if isinstance(__builtins__, dict):
-            __builtins__['__import__'] = patched_import
-        else:
-            __builtins__.__import__ = patched_import
-            
-    except Exception as e:
-        # 如果补丁失败，至少记录错误（在开发环境中）
-        if not getattr(sys, 'frozen', False):
-            print(f"Warning: Failed to patch opentelemetry: {e}")
-        pass
 
+# 执行
+apply_metadata_patch()
+apply_certifi_patch()

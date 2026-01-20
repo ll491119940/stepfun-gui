@@ -9,24 +9,6 @@ import site
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, copy_metadata
 
-# 尝试禁用 PyInstaller 的 hook 自动发现功能（解决 Windows 访问冲突问题）
-try:
-    # 设置环境变量
-    os.environ['PYINSTALLER_DISABLE_HOOK_DISCOVERY'] = '1'
-    # 尝试 monkey patch PyInstaller 的 hook 发现功能
-    try:
-        import PyInstaller.building.build_main
-        # 如果可能，禁用 hook 发现
-        if hasattr(PyInstaller.building.build_main, 'discover_hook_directories'):
-            original_discover = PyInstaller.building.build_main.discover_hook_directories
-            def patched_discover():
-                return []  # 返回空列表，禁用所有 hook 发现
-            PyInstaller.building.build_main.discover_hook_directories = patched_discover
-    except (ImportError, AttributeError):
-        pass
-except Exception:
-    pass  # 如果失败，继续执行
-
 block_cipher = None
 
 # 获取项目根目录（spec 文件所在目录）
@@ -51,6 +33,13 @@ datas_list = [
     ('mcp_server', 'mcp_server'),
 ]
 
+# 强制收集 certifi 的证书文件
+try:
+    datas_list += collect_data_files('certifi')
+    print("✓ 已手动添加 certifi 数据文件")
+except Exception as e:
+    print(f"⚠️ 无法收集 certifi 数据文件: {e}")
+
 # 添加 opentelemetry 元数据（避免 PyInstaller 丢失 entry_points 导致 StopIteration）
 try:
     datas_list += collect_data_files('opentelemetry_api')
@@ -69,7 +58,7 @@ except Exception:
         pass
 
 # 明确复制元数据以支持 importlib_metadata.version 查询
-for _pkg_meta in ['opentelemetry-sdk', 'opentelemetry-api', 'opentelemetry-exporter-prometheus']:
+for _pkg_meta in ['opentelemetry-sdk', 'opentelemetry-api', 'opentelemetry-exporter-prometheus', 'fastmcp']:
     try:
         datas_list += copy_metadata(_pkg_meta)
     except Exception:
